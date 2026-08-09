@@ -1,0 +1,103 @@
+name: Build VST3
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # needed so the release job can publish a GitHub Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-22.04, windows-latest, macos-latest ]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux plugin dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev \
+            libcurl4-openssl-dev libfreetype6-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev
+
+      # Speeds up every run after the first one - JUCE is fetched via
+      # CMake FetchContent, so caching the build tree (which includes the
+      # cloned JUCE source under _deps) avoids re-cloning ~300MB every time.
+      - name: Cache CMake build tree / JUCE checkout
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-juce-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-juce-
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --parallel --target PhatForge_VST3
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhatForge-VST3-${{ runner.os }}
+          path: build/PhatForge_artefacts/Release/VST3/**
+          if-no-files-found: error
+
+  # Runs once after all three platform builds succeed. Downloads each
+  # platform's VST3 artifact and zips them together into one combined
+  # archive containing a subfolder per OS, e.g.:
+  #   PhatForge-VST3-AllPlatforms.zip
+  #   ├── PhatForge-VST3-Windows/PhatForge.vst3/...
+  #   ├── PhatForge-VST3-macOS/PhatForge.vst3/...
+  #   └── PhatForge-VST3-Linux/PhatForge.vst3/...
+  combine:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform VST3 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PhatForge-VST3-*
+          path: combined
+          merge-multiple: false
+
+      - name: Zip combined release
+        run: |
+          cd combined
+          zip -r ../PhatForge-VST3-AllPlatforms.zip .
+          cd ..
+          ls -lh PhatForge-VST3-AllPlatforms.zip
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhatForge-VST3-AllPlatforms
+          path: PhatForge-VST3-AllPlatforms.zip
+          if-no-files-found: error
+
+      # Only publishes an actual GitHub Release when the workflow was
+      # triggered by pushing a version tag, e.g.: git tag v1.0.0 && git push --tags
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "PhatForge-VST3-AllPlatforms.zip" \
+            --title "PhatForge ${{ github.ref_name }}" \
+            --notes "Automated build of the PhatForge VST3 for Windows, macOS, and Linux."
