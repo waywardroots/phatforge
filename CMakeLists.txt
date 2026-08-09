@@ -14,8 +14,8 @@ include(FetchContent)
 FetchContent_Declare(
     JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-    GIT_TAG         7.0.12
-    GIT_SHALLOW    TRUE
+    GIT_TAG         8.0.8        # was 7.1.0 — 7.x's juceaide helper fails to build
+    GIT_SHALLOW    TRUE          # against the macOS 15 SDK on current macos-latest runners
 )
 FetchContent_MakeAvailable(JUCE)
 
