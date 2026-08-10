@@ -48,8 +48,18 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build VST3
-        run: cmake --build build --config Release --parallel --target PhatForge_VST3
+      # AU (the "Component" bundle) is only ever generated as a CMake
+      # target on Apple platforms - JUCE doesn't create a PhatForge_AU
+      # target at all on Windows/Linux, so it's built there via an extra
+      # --target flag only when running on macOS.
+      - name: Build plugin targets
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cmake --build build --config Release --parallel --target PhatForge_VST3 --target PhatForge_AU
+          else
+            cmake --build build --config Release --parallel --target PhatForge_VST3
+          fi
 
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
@@ -58,21 +68,30 @@ jobs:
           path: build/PhatForge_artefacts/Release/VST3/**
           if-no-files-found: error
 
-  # Runs once after all three platform builds succeed. Downloads each
-  # platform's VST3 artifact and zips them together into one combined
-  # archive containing a subfolder per OS, e.g.:
+      - name: Upload AU (Component) artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhatForge-AU-macOS
+          path: build/PhatForge_artefacts/Release/AU/**
+          if-no-files-found: error
+
+  # Runs once after all platform builds succeed. Downloads every artifact
+  # (all VST3s plus the macOS AU component) and zips them into one combined
+  # archive with a subfolder per artifact, e.g.:
   #   PhatForge-VST3-AllPlatforms.zip
   #   ├── PhatForge-VST3-Windows/PhatForge.vst3/...
   #   ├── PhatForge-VST3-macOS/PhatForge.vst3/...
-  #   └── PhatForge-VST3-Linux/PhatForge.vst3/...
+  #   ├── PhatForge-VST3-Linux/PhatForge.vst3/...
+  #   └── PhatForge-AU-macOS/PhatForge.component/...
   combine:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all platform VST3 artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: PhatForge-VST3-*
+          pattern: PhatForge-*
           path: combined
           merge-multiple: false
 
@@ -100,4 +119,4 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             "PhatForge-VST3-AllPlatforms.zip" \
             --title "PhatForge ${{ github.ref_name }}" \
-            --notes "Automated build of the PhatForge VST3 for Windows, macOS, and Linux."
+            --notes "Automated build of the PhatForge VST3 (Win/Mac/Linux) and AU component (Mac)."
