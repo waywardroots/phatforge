@@ -61,29 +61,40 @@ jobs:
             cmake --build build --config Release --parallel --target PhatForge_VST3
           fi
 
-      - name: Upload VST3 artifact
+      # Windows and Linux only ever produce a VST3, so they get their own
+      # single-format artifact.
+      - name: Upload VST3 artifact (Windows/Linux)
+        if: runner.os != 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: PhatForge-VST3-${{ runner.os }}
           path: build/PhatForge_artefacts/Release/VST3/**
           if-no-files-found: error
 
-      - name: Upload AU (Component) artifact
+      # macOS produces both formats, so they're bundled into one artifact
+      # (upload-artifact preserves the folder structure below the common
+      # parent of the two paths, so this comes out as:
+      #   PhatForge-macOS/VST3/PhatForge.vst3/...
+      #   PhatForge-macOS/AU/PhatForge.component/...
+      - name: Upload VST3 + AU artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: PhatForge-AU-macOS
-          path: build/PhatForge_artefacts/Release/AU/**
+          name: PhatForge-macOS
+          path: |
+            build/PhatForge_artefacts/Release/VST3/**
+            build/PhatForge_artefacts/Release/AU/**
           if-no-files-found: error
 
   # Runs once after all platform builds succeed. Downloads every artifact
-  # (all VST3s plus the macOS AU component) and zips them into one combined
-  # archive with a subfolder per artifact, e.g.:
+  # (the Windows/Linux VST3s plus the combined macOS VST3+AU artifact) and
+  # zips them into one combined archive with a subfolder per artifact, e.g.:
   #   PhatForge-VST3-AllPlatforms.zip
   #   ├── PhatForge-VST3-Windows/PhatForge.vst3/...
-  #   ├── PhatForge-VST3-macOS/PhatForge.vst3/...
   #   ├── PhatForge-VST3-Linux/PhatForge.vst3/...
-  #   └── PhatForge-AU-macOS/PhatForge.component/...
+  #   └── PhatForge-macOS/
+  #       ├── VST3/PhatForge.vst3/...
+  #       └── AU/PhatForge.component/...
   combine:
     needs: build
     runs-on: ubuntu-latest
